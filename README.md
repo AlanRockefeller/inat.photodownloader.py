@@ -2,7 +2,7 @@
 
 **Version:** 1.0  
 **Author:** Alan Rockefeller  
-**Date:** April 30, 2025  
+**Last updated:** 2024-07-16  
 **License:** GNU GPL 3.0  
 
 ## Description
@@ -17,6 +17,7 @@ This tool is particularly useful for photographers and scientists who need to ma
 - Gets photo IDs associated with each observation
 - Scrapes the original filenames from iNaturalist photo pages using your session cookie
 - Creates a CSV file with observation IDs and their associated photo filenames
+- Efficiently makes requests using a persistent session
 - Optionally includes photo URLs in the CSV output
 - Optionally downloads original-sized images with their original filenames
 - Customizable output filename and image download directory
@@ -70,6 +71,8 @@ Full options:
 | `--help` | Show help message and exit |
 
 ### How To Get Your iNaturalist Session Cookie
+
+This cookie is required to access the original photo filenames, which are typically only visible to you when logged in.
 
 1. Log in to https://www.inaturalist.org in Chrome or Firefox.
 2. Open DevTools:
