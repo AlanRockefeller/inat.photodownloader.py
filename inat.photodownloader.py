@@ -88,7 +88,8 @@ output_filename = args.output if args.output else "inaturalist_filenames.csv"
 
 # -------------------- Globals --------------------
 BASE_API_URL = "https://api.inaturalist.org/v1/observations"
-HEADERS = {"User-Agent": "Mozilla/5.0"}
+# Guidelines: Use a custom User-Agent to identify your application.
+HEADERS = {"User-Agent": "iNaturalistPhotoDownloader/1.0"}
 COOKIES = {}
 
 if args.cookie:
@@ -96,17 +97,26 @@ if args.cookie:
     if args.debug:
         print(f"[DEBUG] Using cookie: _inaturalist_session={args.cookie[:5]}...")
 
-# -------------------- Rate Limit Logic --------------------
-last_api_time = 0
-last_request_time = 0
+# -------------------- Unified Rate Limit Logic --------------------
+class RateLimiter:
+    def __init__(self, requests_per_second=1.0):
+        self.delay = 1.0 / requests_per_second
+        self.last_request_time = 0
+
+    def wait(self):
+        now = time.time()
+        elapsed = now - self.last_request_time
+        wait_time = max(0, self.delay - elapsed)
+        if wait_time > 0:
+            time.sleep(wait_time)
+        self.last_request_time = time.time()
+
+# Global rate limiter to be shared across API, Scraper, and Downloader
+# Guidelines: Limit requests to approximately 1 request per second.
+global_limiter = RateLimiter(requests_per_second=1.0)
 
 def rate_limited_request(method, url, **kwargs):
-    global last_request_time
-    now = time.time()
-    delay = max(0, 1.0 - (now - last_request_time))
-    if delay > 0:
-        time.sleep(delay)
-    last_request_time = time.time()
+    global_limiter.wait()
     if method.lower() == 'get':
         return requests.get(url, **kwargs)
     elif method.lower() == 'post':
@@ -115,12 +125,8 @@ def rate_limited_request(method, url, **kwargs):
         raise ValueError(f"Unsupported method: {method}")
 
 def rate_limited_api_get(url, params=None):
-    global last_api_time
-    now = time.time()
-    delay = max(0, 1.0 - (now - last_api_time))
-    if delay > 0:
-        time.sleep(delay)
-    last_api_time = time.time()
+    # Uses the same global limiter to share the "bucket" with other requests
+    global_limiter.wait()
     return requests.get(url, params=params)
 
 # -------------------- Fetch Observation IDs --------------------
@@ -445,6 +451,10 @@ try:
                             if success:
                                 downloaded_photos += 1
                                 print(f"[INFO] Successfully downloaded photo {photo_id}")
+                                # Guidelines: Limit media downloads to < 5GB/hour.
+                                # A 5MB image every ~4 seconds is approx 4.5GB/hour.
+                                # We wait 3s here + 1s standard rate limit = 4s total per image.
+                                time.sleep(3)
                             else:
                                 print(f"[ERROR] All download methods failed for photo {photo_id}")
                 
