@@ -1,19 +1,26 @@
-#!/usr/bin/python3
+#!/usr/bin/env python3
 
 # iNaturalist photo / photo filename downloader
 
 # Version 1.0 - by Alan Rockefeller
 # April 30, 2025
 
-import argparse
-import requests
-from bs4 import BeautifulSoup
-import csv
-import time
 import sys
-import os
-import re
-from urllib.parse import urlparse, urljoin
+
+try:
+    import argparse
+    import requests
+    from bs4 import BeautifulSoup
+    import csv
+    import time
+    import os
+    import re
+    from urllib.parse import urlparse, urljoin
+except ImportError as e:
+    print(f"\n[!] Critical Requirement Missing: {e}")
+    print("    Please install the required libraries by running:")
+    print("    pip install requests beautifulsoup4")
+    sys.exit(1)
 
 # -------------------- Argument Parsing --------------------
 parser = argparse.ArgumentParser(
@@ -70,25 +77,31 @@ parser.add_argument("-o", "--out", "--output", dest="output", help="Output CSV f
 args = parser.parse_args()
 
 if len(sys.argv) == 1:
+    print("Welcome to iNaturalist Photo Downloader!")
+    print("No arguments provided. Showing help menu below:\n")
     parser.print_help()
     sys.exit(0)
 
 if not args.username:
-    print("Error: --username is required.\n")
-    parser.print_help()
+    print("\n[!] Requirement Missing: Username")
+    print("    You must provide an iNaturalist username to fetch data.")
+    print("    Usage: --username <your_username>")
     sys.exit(1)
 
 # Validate output filename
 if args.output:
     if not args.output.lower().endswith('.csv'):
-        print("Error: Output filename must end with .csv")
+        print(f"\n[!] Invalid Requirement: Output Filename '{args.output}'")
+        print("    The output filename must have a .csv extension.")
+        print("    Usage: --output my_results.csv")
         sys.exit(1)
 
 output_filename = args.output if args.output else "inaturalist_filenames.csv"
 
 # -------------------- Globals --------------------
 BASE_API_URL = "https://api.inaturalist.org/v1/observations"
-HEADERS = {"User-Agent": "Mozilla/5.0"}
+# Guidelines: Use a custom User-Agent to identify your application.
+HEADERS = {"User-Agent": "iNaturalistPhotoDownloader/1.0"}
 COOKIES = {}
 
 if args.cookie:
@@ -96,17 +109,26 @@ if args.cookie:
     if args.debug:
         print(f"[DEBUG] Using cookie: _inaturalist_session={args.cookie[:5]}...")
 
-# -------------------- Rate Limit Logic --------------------
-last_api_time = 0
-last_request_time = 0
+# -------------------- Unified Rate Limit Logic --------------------
+class RateLimiter:
+    def __init__(self, requests_per_second=1.0):
+        self.delay = 1.0 / requests_per_second
+        self.last_request_time = 0
+
+    def wait(self):
+        now = time.time()
+        elapsed = now - self.last_request_time
+        wait_time = max(0, self.delay - elapsed)
+        if wait_time > 0:
+            time.sleep(wait_time)
+        self.last_request_time = time.time()
+
+# Global rate limiter to be shared across API, Scraper, and Downloader
+# Guidelines: Limit requests to approximately 1 request per second.
+global_limiter = RateLimiter(requests_per_second=1.0)
 
 def rate_limited_request(method, url, **kwargs):
-    global last_request_time
-    now = time.time()
-    delay = max(0, 1.0 - (now - last_request_time))
-    if delay > 0:
-        time.sleep(delay)
-    last_request_time = time.time()
+    global_limiter.wait()
     if method.lower() == 'get':
         return requests.get(url, **kwargs)
     elif method.lower() == 'post':
@@ -115,12 +137,8 @@ def rate_limited_request(method, url, **kwargs):
         raise ValueError(f"Unsupported method: {method}")
 
 def rate_limited_api_get(url, params=None):
-    global last_api_time
-    now = time.time()
-    delay = max(0, 1.0 - (now - last_api_time))
-    if delay > 0:
-        time.sleep(delay)
-    last_api_time = time.time()
+    # Uses the same global limiter to share the "bucket" with other requests
+    global_limiter.wait()
     return requests.get(url, params=params)
 
 # -------------------- Fetch Observation IDs --------------------
@@ -445,6 +463,10 @@ try:
                             if success:
                                 downloaded_photos += 1
                                 print(f"[INFO] Successfully downloaded photo {photo_id}")
+                                # Guidelines: Limit media downloads to < 5GB/hour.
+                                # A 5MB image every ~4 seconds is approx 4.5GB/hour.
+                                # We wait 3s here + 1s standard rate limit = 4s total per image.
+                                time.sleep(3)
                             else:
                                 print(f"[ERROR] All download methods failed for photo {photo_id}")
                 
@@ -470,8 +492,24 @@ except KeyboardInterrupt:
     print("\n[INFO] Interrupted by user.")
     sys.exit(1)
 
+except requests.exceptions.ConnectionError:
+    print("\n[!] Network Error: Could not connect to iNaturalist.")
+    print("    Please check your internet connection and try again.")
+    sys.exit(1)
+
+except requests.exceptions.Timeout:
+    print("\n[!] Network Error: Request timed out.")
+    print("    The server might be busy or your connection is slow. Please try again later.")
+    sys.exit(1)
+
+except IOError as e:
+    print(f"\n[!] File Error: {e}")
+    print("    Check if the file is open in another program or if you have write permissions.")
+    sys.exit(1)
+
 except Exception as e:
-    print(f"[ERROR] {e}")
+    print(f"\n[!] Unexpected Error: {e}")
+    print("    If this persists, please report it to the developer.")
     sys.exit(1)
 
 print(f"\n[INFO] Done. Results saved to {output_filename}")
